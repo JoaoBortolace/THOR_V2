@@ -14,7 +14,8 @@ module BPU #(
     output reg [$clog2(PREDITOR_DEPTH)-1:0] preditorIndex,
     // Preditor Update (commit)
     input  preditorUpdate,
-    input  branchResult,
+    input  globalPreditorUpdate // Especulativo
+    input  lastResult,
     input  [$clog2(PREDITOR_DEPTH)-1:0] lastIndex,
     // BTB Update
     input  btbUpdate,
@@ -30,51 +31,44 @@ module BPU #(
     reg [HISTORY_SIZE-1:0] globalHistory;         // GHR
     reg [1:0] preditor [0:PREDITOR_DEPTH-1];      // 2-bit counters
     // BTB: [valid, type, target_compact]
-    // target_compact armazena (XLEN-4) bits ==> remove bit0 e assume top 3 bits 0
-    reg [XLEN-3:0] BTB [0:BTB_DEPTH-1];
+    // target_compact armazena (XLEN-5) bits ==> remove bit0 e bit1 e assume top 3 bits 0
+    reg [XLEN-4:0] BTB [0:BTB_DEPTH-1];
 
     // ----------------------------------------------------------------
+    // Índices da BTB (Word-aligned: usa [AWIDTH+1:2])
+    wire [BTB_AWIDTH-1:0] index = iAddr[BTB_AWIDTH+1:2];
+
     // Hash de índice do preditor: usa bits do PC [HISTORY_SIZE+1:2] XOR GHR
-    function automatic [HISTORY_SIZE-1:0] pred_hash;
-        input [XLEN-1:0] pc;
-        input [HISTORY_SIZE-1:0] gh;
-    begin
-        pred_hash = pc[HISTORY_SIZE+1:2] ^ gh;
-    end
-    endfunction
-
-    // Índices da BTB (halfword-aligned: usa [AWIDTH:1])
-    wire [BTB_AWIDTH-1:0] index = iAddr[BTB_AWIDTH:1];
-
-    // Índices do preditor
-    wire [HISTORY_SIZE-1:0] idx = iAddr ^ globalHistory;
+    wire [HISTORY_SIZE-1:0] idx = iAddr[HISTORY_SIZE+1:2] ^ globalHistory;
 
     // Leitura do preditor (bit MSB do contador => previsão)
     wire prediction = preditor[idx][1];
 
     // Leitura da BTB
-    wire hit        = BTB[index][XLEN-3];
-    wire type       = BTB[index][XLEN-4];
-    assign branchTarget = {3'b000, BTB[index][XLEN-5:0], 1'b0};
+    wire hit        = BTB[index][XLEN-4];
+    wire type       = BTB[index][XLEN-5];
+    assign branchTarget = {3'b000, BTB[index][XLEN-6:0], 2'b00};
     assign branchTaken = hit && (typeA || predictionA);
 
     // ----------------------------------------------------------------
     // Reset/flush e updates
     always @(posedge clock or negedge resetn) begin
-        if (!resetn || flush) begin
+        if (!resetn) begin
             globalHistory <= {HISTORY_SIZE{1'b0}};
             for (integer i = 0; i < PREDITOR_DEPTH; i = i + 1)
                 preditor[i] <= 2'b10; // ligeiramente tendente a 'taken'
             for (integer j = 0; j < BTB_DEPTH; j = j + 1)
-                BTB[j] <= {1'b0, {XLEN-4{1'b0}}};
-        end else begin
+                BTB[j] <= {1'b0, {XLEN-5{1'b0}}};
+        end else if (flush)
+            globalHistory <= {HISTORY_SIZE{1'b0}};
+        else begin
+            if (globalPreditorUpdate)
+                // Atualiza GHR (especulativo): shift e injeta o resultado
+                globalHistory <= {globalHistory[HISTORY_SIZE-2:0], lastResult};
             // Update do preditor (commit)
             if (preditorUpdate) begin
-                // Atualiza GHR (não especulativo): shift e injeta o resultado
-                globalHistory <= {globalHistory[HISTORY_SIZE-2:0], branchResult};
-
                 // Atualiza contador saturante 2-bit
-                if (branchResult) begin
+                if (lastResult) begin
                     if (preditor[lastIndex] != 2'b11)
                         preditor[lastIndex] <= preditor[lastIndex] + 2'b01;
                 end else begin
@@ -86,7 +80,7 @@ module BPU #(
             if (btbUpdate) begin
                 // Usa o mesmo mapeamento de índice da leitura
                 wire [BTB_AWIDTH-1:0] wIndex = branchAddr[BTB_AWIDTH:1];
-                BTB[wIndex] <= {1'b1, branchType, target[XLEN-3:1]};
+                BTB[wIndex] <= {1'b1, branchType, target[XLEN-3:2]};
             end
         end
     end

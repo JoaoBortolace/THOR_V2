@@ -17,7 +17,16 @@ module IF_STAGE #(
     // Redirect Branch
     input redirectBranch,           // Redirect when a prediction error occurs or interrupts
     input [XLEN-1:0] redirectTarget,
-    // BPU Update
+    // Branch Preditor
+    input bpuFlush,
+    input preditorUpdate,
+    input globalPreditorUpdate,
+    input lastResult,
+    input [$clog2(PREDITOR_DEPTH)-1:0] lastIndex,
+    input btbUpdate,
+    input branchType,
+    input [XLEN-1:0] target,
+    input [XLEN-1:0] branchAddr
 );
     // Clock gate
     reg clockEn;
@@ -48,7 +57,8 @@ module IF_STAGE #(
         .branchTarget(branchTarget),
         .preditorIndex(preditorIndex),
         .preditorUpdate(preditorUpdate),
-        .branchResult(branchResult),
+        .globalPreditorUpdate(globalPreditorUpdate),
+        .lastResult(lastResult),
         .lastIndex(lastIndex),
         .btbUpdate(btbUpdate),
         .branchType(branchType),

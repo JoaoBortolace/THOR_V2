@@ -12,12 +12,15 @@ module FIFO #(
     // Instruction Push/Pop
     input  push,
     input  [29:0] instrIn,
+    input  [XLEN-6:0] iAddrIn,            // iAddr of current instruction
     input  pop,                           // Pop 2 instructions
     output [29:0] instrOutA,
-    output [29:0] instrOutB
+    output [XLEN-6:0] iAddrOutA,
+    output [29:0] instrOutB,
+    output [XLEN-6:0] iAddrOutB
 );
     // Queue memory
-    reg [29:0] queue [0:DEPTH-1];
+    reg [XLEN-6 + 29:0] queue [0:DEPTH-1];
 
     // Queue pointers
     localparam QUEUE_ADDR = $clog2(DEPTH);
@@ -26,8 +29,10 @@ module FIFO #(
     reg [QUEUE_ADDR:0] count;
 
     // Output logic
-    assign instrOutA = (count >= 1) ? queue[first] : NOP[31:2];
-    assign instrOutB = (count >= 2) ? queue[(first + 1) & (DEPTH - 1)] : NOP[31:2];
+    assign instrOutA = (count >= 1) ? queue[first][29:0] : NOP[31:2];
+    assign iAddrOutA = (count >= 1) ? queue[first][XLEN-6:30] : 0;
+    assign instrOutB = (count >= 2) ? queue[(first + 1) & (DEPTH - 1)][29:0] : NOP[31:2];
+    assign iAddrOutB = (count >= 2) ? queue[(first + 1) & (DEPTH - 1)][XLEN-6:30] : 0;
 
     // Status flags
     assign queueEmpty = (count == 0);
@@ -39,7 +44,7 @@ module FIFO #(
             last  <= 0;
             count <= 0;
             for (integer i = 0; i < DEPTH; i = i + 1)
-                queue[i] <= {30{1'b0}};
+                queue[i] <= 0;
         end else begin
             // Pop logic
             if (pop && count >= 2) begin
@@ -51,7 +56,7 @@ module FIFO #(
             end
             // Push logic
             if (push && count < DEPTH) begin
-                queue[last] <= instrIn;
+                queue[last] <= {iAddrIn, instrIn};
                 last <= (last + 1) & (DEPTH - 1);
                 count <= count + 1;
             end
