@@ -11,7 +11,7 @@ module IF_STAGE #(
     output reg [XLEN-1:0] iAddr,    // Address of current instruction to be fetched
     input  [XLEN-1:0] iData,        // Instruction Data
     // Instruction Fetched
-    input queueFull,                // Fifo buffer full
+    input bufferFull,               // Fifo buffer full
     output reg push,                // Push instruction to fifo buffer
     output reg [29:0] instr,        // Instruction fetched
     // Redirect Branch
@@ -21,10 +21,10 @@ module IF_STAGE #(
     input bpuFlush,
     input preditorUpdate,
     input globalPreditorUpdate,
-    input lastResult,
+    input lastBranch,
     input [$clog2(PREDITOR_DEPTH)-1:0] lastIndex,
     input btbUpdate,
-    input branchType,
+    input typeBranch,
     input [XLEN-1:0] target,
     input [XLEN-1:0] branchAddr
 );
@@ -32,7 +32,7 @@ module IF_STAGE #(
     reg clockEn;
     always @(*) begin
         if (~clock)
-            clockEn <= ~queueFull;
+            clockEn <= ~bufferFull;
         else if (~resetn)
             clockEn <= 1'b1;
     end
@@ -42,7 +42,6 @@ module IF_STAGE #(
     // Branch Preditor and Branch Buffer Target
     wire branchTaken;
     wire [XLEN-1:0] branchTarget;
-    wire bpuFlush;
 
     BPU #(
         .XLEN(XLEN),
@@ -58,10 +57,10 @@ module IF_STAGE #(
         .preditorIndex(preditorIndex),
         .preditorUpdate(preditorUpdate),
         .globalPreditorUpdate(globalPreditorUpdate),
-        .lastResult(lastResult),
+        .lastBranch(lastBranch),
         .lastIndex(lastIndex),
         .btbUpdate(btbUpdate),
-        .branchType(branchType),
+        .typeBranch(typeBranch),
         .target(target),
         .branchAddr(branchAddr)
     );
@@ -72,7 +71,7 @@ module IF_STAGE #(
 
     always @(*) begin
         instr = iData[31:2]; // Os dois primeros bits são sempre 1
-        push  = (iData[7:2] != NOP[7:2]) && !queueFull; // Empura somente se tiver lugar ou se a instrução não é um nop
+        push  = (iData[7:2] != NOP[7:2]) && !bufferFull; // Empura somente se tiver lugar ou se a instrução não é um nop
 
         case (pcSrc)
             2'b00: iAddrNext = iAddr + 4;

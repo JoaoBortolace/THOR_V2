@@ -1,6 +1,6 @@
 module ID_STAGE #(
     parameter XLEN = 32,            // Width of GPR (32 or 64)
-    parameter NUM_REG = 32,         // Nuumber of GPR (16 or 32)
+    parameter NUM_REG = 32         // Nuumber of GPR (16 or 32)
 )(
     input clock,
     input resetn,                   // Asynchronous reset on low level

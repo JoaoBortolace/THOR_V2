@@ -1,2 +1,9 @@
 /INT_RF.v
 /RVC_Expanded.vh
+/db
+/incremental_db
+/simulation
+/*.bak
+/*.qpf
+/*.qsf
+/output_files

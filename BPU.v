@@ -8,80 +8,80 @@ module BPU #(
     input  flush,
     // Preditor (fetch)
     input  [XLEN-1:0] iAddr,
-    output            branchTaken,
-    output [XLEN-1:0] branchTarget,
-    // Exporte o índice usado na predição para atualizar depois
-    output reg [$clog2(PREDITOR_DEPTH)-1:0] preditorIndex,
+    output reg            branchTaken,
+    output reg [XLEN-1:0] branchTarget,
     // Preditor Update (commit)
     input  preditorUpdate,
-    input  globalPreditorUpdate // Especulativo
-    input  lastResult,
+    input  globalPreditorUpdate, // Especulativo (atualiza GHR)
+    output reg [$clog2(PREDITOR_DEPTH)-1:0] preditorIndex,
     input  [$clog2(PREDITOR_DEPTH)-1:0] lastIndex,
+    input  missPredict,
+    input  lastBranch,
     // BTB Update
     input  btbUpdate,
-    input  branchType,                 // 1 = unconditional or forced taken, 0 = conditional
+    input  typeBranch,                 // 1 = unconditional ou forced taken, 0 = conditional
     input  [XLEN-1:0] target,
     input  [XLEN-1:0] branchAddr
 );
     // ----------------------------------------------------------------
-    // Tamanhos e estado
     localparam HISTORY_SIZE = $clog2(PREDITOR_DEPTH);
     localparam BTB_AWIDTH   = $clog2(BTB_DEPTH);
 
-    reg [HISTORY_SIZE-1:0] globalHistory;         // GHR
-    reg [1:0] preditor [0:PREDITOR_DEPTH-1];      // 2-bit counters
-    // BTB: [valid, type, target_compact]
-    // target_compact armazena (XLEN-5) bits ==> remove bit0 e bit1 e assume top 3 bits 0
-    reg [XLEN-4:0] BTB [0:BTB_DEPTH-1];
+    // GHR
+    reg [HISTORY_SIZE-1:0] globalHistory;
+    // Preditor
+    reg preditor [0:PREDITOR_DEPTH-1]; 
+    // Histerese 
+    reg histerese[0:PREDITOR_DEPTH-1]; 
+    // Branch Target Buffer [valid, type, target_compact]
+    reg [XLEN-4:0] BTB  [0:BTB_DEPTH-1];       
 
-    // ----------------------------------------------------------------
-    // Índices da BTB (Word-aligned: usa [AWIDTH+1:2])
-    wire [BTB_AWIDTH-1:0] index = iAddr[BTB_AWIDTH+1:2];
+    // Índices
+    wire [BTB_AWIDTH-1:0]   btbIndex = iAddr[BTB_AWIDTH+1:2];
+    wire [HISTORY_SIZE-1:0] idx      = iAddr[HISTORY_SIZE+1:2] ^ globalHistory;
 
-    // Hash de índice do preditor: usa bits do PC [HISTORY_SIZE+1:2] XOR GHR
-    wire [HISTORY_SIZE-1:0] idx = iAddr[HISTORY_SIZE+1:2] ^ globalHistory;
+    // Sinais de leitura combinacional
+    reg prediction;
+    reg hit;
+    reg branchType;
+    reg [XLEN-4:0] btbData;
 
-    // Leitura do preditor (bit MSB do contador => previsão)
-    wire prediction = preditor[idx][1];
+    always @(*) begin
+        // Índice exportado usado na predição
+        preditorIndex = idx;
+        // Preditor
+        prediction = preditor[idx];
+        // BTB
+        btbData      = BTB[btbIndex];
+        hit          = btbData[XLEN-4];
+        branchType   = btbData[XLEN-5];
+        branchTarget = {3'b000, btbData[XLEN-6:0], 2'b00};
+        branchTaken  = hit & (branchType | prediction);
+    end
 
-    // Leitura da BTB
-    wire hit        = BTB[index][XLEN-4];
-    wire type       = BTB[index][XLEN-5];
-    assign branchTarget = {3'b000, BTB[index][XLEN-6:0], 2'b00};
-    assign branchTaken = hit && (typeA || predictionA);
-
-    // ----------------------------------------------------------------
-    // Reset/flush e updates
+    // Atualizações e reset
+    integer i;
     always @(posedge clock or negedge resetn) begin
         if (!resetn) begin
             globalHistory <= {HISTORY_SIZE{1'b0}};
-            for (integer i = 0; i < PREDITOR_DEPTH; i = i + 1)
-                preditor[i] <= 2'b10; // ligeiramente tendente a 'taken'
-            for (integer j = 0; j < BTB_DEPTH; j = j + 1)
-                BTB[j] <= {1'b0, {XLEN-5{1'b0}}};
-        end else if (flush)
-            globalHistory <= {HISTORY_SIZE{1'b0}};
-        else begin
-            if (globalPreditorUpdate)
-                // Atualiza GHR (especulativo): shift e injeta o resultado
-                globalHistory <= {globalHistory[HISTORY_SIZE-2:0], lastResult};
+        end else begin
+            // Flush só limpa GHR
+            if (flush)
+                globalHistory <= {HISTORY_SIZE{1'b0}};           
+            // Atualiza GHR (especulativo)
+            else if (globalPreditorUpdate)
+                globalHistory <= {globalHistory[HISTORY_SIZE-2:0], lastBranch};
+
             // Update do preditor (commit)
             if (preditorUpdate) begin
-                // Atualiza contador saturante 2-bit
-                if (lastResult) begin
-                    if (preditor[lastIndex] != 2'b11)
-                        preditor[lastIndex] <= preditor[lastIndex] + 2'b01;
-                end else begin
-                    if (preditor[lastIndex] != 2'b00)
-                        preditor[lastIndex] <= preditor[lastIndex] - 2'b01;
-                end
+                if (missPredict)
+                    preditor[lastIndex] <= histerese[lastIndex];
+                // Atualiza histerese com o resultado atual
+                histerese[lastIndex] <= lastBranch;
             end
             // Update da BTB (commit)
-            if (btbUpdate) begin
-                // Usa o mesmo mapeamento de índice da leitura
-                wire [BTB_AWIDTH-1:0] wIndex = branchAddr[BTB_AWIDTH:1];
-                BTB[wIndex] <= {1'b1, branchType, target[XLEN-3:2]};
-            end
+            if (btbUpdate)
+                BTB[branchAddr[BTB_AWIDTH+1:2]] <= {1'b1, typeBranch, target[XLEN-4:2]};
         end
     end
 endmodule

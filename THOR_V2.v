@@ -1,18 +1,17 @@
 /*
     THOR-V2: RISC-V RV32(I/E)MA pipeline CPU 
 */
-module THOR_V2 (
+module THOR_V2 #(
     parameter XLEN = 32,            // Width of GPR (32 or 64)
-    parameter NUM_REG = 16,         // Nuumber of GPR (16 or 32)
+    parameter NUM_REG = 32,         // Nuumber of GPR (16 or 32)
     parameter SRAM_SIZE = 4096,     // Size of SRAM in bytes
     parameter ROM_SIZE  = 4096,     // Size of ROM in bytes
     parameter PREDITOR_DEPTH = 128,
     parameter BTB_DEPTH = 128,
-    parameter QUEUE_DEPTH = 4
+    parameter QUEUE_DEPTH = 16
 )(
     input clock,
     input resetn,                   // Asynchronous reset on low level
-
     // Instruction BUS
     output iMemEn,                  // Enable for instruction memory
     output [XLEN-1:0] iAddr,        // Address of current instruction to be fetched
@@ -21,20 +20,19 @@ module THOR_V2 (
     output dMemEn,                  // Enable for instruction memory
     output dMemCmd,                 // Read / Write command
     output [XLEN-1:0] dAddr,        // Address of data to be loaded/stored
-    inout  [XLEN-1:0] dData,        // Data content
+    input  [XLEN-1:0] dData,        // Data content
     // Interrupt
     input  interruptRequest,
     input  [XLEN-1:0] handlerAddr,  // Address of interrupt handler
     output interruptTaken           // Interrupt accepted
 );
-    
     //================================
     // Fetch Stage
     //================================
 
     wire flushQueue;
-    wire queueEmpty;
-    wire queueFull;
+    wire bufferEmpty;
+    wire bufferFull;
     wire push;
     wire [29:0] instr;
     wire pop;
@@ -54,27 +52,30 @@ module THOR_V2 (
         .iMemEn(iMemEn),
         .iAddr(iAddr),
         .iData(iData),
-        .queueFull(queueFull),
+        .bufferFull(bufferFull),
         .push(push),
         .instr(instr),
         .redirectBranch(redirectBranch),
         .redirectTarget(redirectTarget)
     );
 
-    FIFO #(
+    INSTRUCTION_BUFFER #(
         .XLEN(XLEN),
         .DEPTH(QUEUE_DEPTH)
-    ) FIFO1 (
+    ) Q1 (
         .clock(clock),
         .resetn(resetn),
         .flush(flushQueue),
-        .queueEmpty(queueEmpty),
-        .queueFull(queueFull),
+        .bufferEmpty(bufferEmpty),
+        .bufferFull(bufferFull),
         .push(push),
         .instrIn(instr),
+        .iAddrIn(iAddr),
         .pop(pop),
         .instrOutA(instrA),
-        .instrOutB(instrB)
+        .iAddrOutA(iAddrOutA),
+        .instrOutB(instrB),
+        .iAddrOutB(iAddrOutB)
     );
 
     //================================
